@@ -1,0 +1,1802 @@
+---
+title: "An Introduction to Machine Learning in R"
+author: "Vivek Jason"
+project:
+  type: website
+  output-dir: docs
+format:
+  html:
+    toc: true
+    toc-location: left
+editor: visual
+theme: lux
+---
+
+## An agenda to learn how the machine learns!
+
+-   Session 1: Introducing Tidymodels (February 2023) - ***COMPLETED***
+-   Session 2: Recipes and Workflows (February 2023) - ***COMPLETED***
+-   Session 2: Modelling approaches (April 2023) - ***COMPLETED***
+    -   Supervised ML: 1) Random Forest, 2) SVM, 3) Xgboost
+-   Session 4: Cross-validation and Tuning (May 2023)
+-   Session 5: Model evaluation (June 2023)
+    -   Confusion matrix metrics, ROC/AUC, SHAP
+-   Session 6: Troubleshooting your models (August 2023)
+-   Session 7: Presenting your models (September 2023)
+
+## Introducing Tidymodels
+
+We introduced the xgboost package in R in our first session in December 2022. We got some predictions, feature importance, got the confusion matrix and extracted SHAP values. **HOWEVER!** You may have realised that for every package you called in- the code you had to write was slightly different and even worse you may have experienced some conflicting dependencies!
+
+Tidymodels is an elegant solution to overcome this issue! It allows us to build our models using a standardised grammar but swap out the engine (modelling approach) as we like using the parsnip package.
+
+![Tidymodels at the heart of the Data Science Workflow (Source: R for Data Science, 2023)](images/ds.png){alt="Tidymodels at the heart of the Data Science Workflow (Source: R for Data Science, 2023)"}
+
+It's important to remember that the tidymodels package (just like the tidyverse package) compiles multiple different packages- utilising each for a specific task. Think of different packages acting like different parts of a race car or the process of baking a cake.
+
+![Workflow of packages utilised in Tidymodels (Source: R for Data Science, 2023)](images/tidymodels.png){alt="Workflow of packages utilised in Tidymodels (Source: R for Data Science, 2023)"}
+
+-   `rsample` - Different types of re-samples
+
+-   `recipes` - Transformations for model data pre-processing
+
+-   `parnip` - A common interface for model creation
+
+-   `yardstick` - Measure model performance
+
+## Recipes and Workflows
+
+Let's start!
+
+```{r, message=FALSE, warning=FALSE}
+library(tidymodels)
+library(readr)#read in csv
+library(plotly)
+library(kableExtra) #nicer tables in quarto
+library(cowplot)#put several figures together
+library(shapviz)
+library(pkgdown)
+```
+
+### The data
+
+Team 3 (Kim and Jason) will be working on NHMS data from 2015 specifically looking at the rates of undiagnosed Type II Diabetes, Hypertension and Cholesterol. As the data is confidential- a dummy dataset was developed for the purposes of this tutorial by sampling from and scrambling up the original data. There are 5,000 rows of data provided- each row does being an individual. Please note as the data has been scrambled- **EACH ROW IS NOT AN ACTUAL PERSONS RESPONSES**. As such the results from this tutorial are also not valid. The data has also been cleaned and only variables of interest were selected.
+
+```{r}
+analytic_df <- read_csv("data/nhms_dummy.csv", 
+    col_types = cols(sex = col_number(), 
+        age = col_number(), age_cat = col_number(), 
+        ethnic = col_number(), residential = col_number(), 
+        married = col_number(), education = col_number(), 
+        income = col_number(), hh_income = col_number(), 
+        occupation = col_number(), cons_fv = col_number(), 
+        alcohol = col_number(), smoke = col_number(), 
+        pa = col_number(), undx_dm = col_number(), 
+        undx_hpt = col_number(), undx_chol = col_number(), 
+        hpt = col_number(), dm = col_number(), 
+        chol = col_number(), bmi_cat = col_number(), 
+        bmi = col_number(), waist = col_number(), 
+        weight = col_number(), height = col_number(), 
+        sys = col_number(), dys = col_number(), 
+        rbs = col_number(), rchol = col_number(), 
+        mean_f = col_number(), mean_v = col_number(), 
+        pa_3cat = col_number(), vig_day = col_number(), 
+        vig_min = col_number(), mod_day = col_number(), 
+        mod_min = col_number(), walk_day = col_number(), 
+        walk_min = col_number()))
+```
+
+### Exploratory data analysis
+
+We can just have a quick look at the data
+
+```{r}
+analytic_df %>% 
+  skimr::skim()
+```
+
+We can also plot anything of interest. With bigger or big data this is usually a good idea! Let look at the differences in bmi and random blood sugar by income status
+
+```{r, warning=FALSE}
+p <- ggplot(analytic_df,
+       aes(x = bmi, 
+           y = rbs, 
+           group = factor(income), 
+           col = factor(income))) + 
+  geom_point(alpha=0.2) + 
+  geom_smooth(method = lm, se = FALSE) +
+  scale_color_viridis_d(option = "plasma", end = .7)
+ggplotly(p)
+```
+
+Lets try another configuration- this time instead of blood sugar lets look at cholestrol
+
+```{r, warning=FALSE}
+p <- ggplot(analytic_df,
+       aes(x = bmi, 
+           y = rchol, 
+           group = factor(income), 
+           col = factor(income))) + 
+  geom_point(alpha=0.2) + 
+  geom_smooth(method = lm, se = FALSE) +
+  scale_color_viridis_d(option = "plasma", end = .7)
+ggplotly(p)
+```
+
+or something else- lets try systolic BP
+
+```{r, warning=FALSE}
+p <- ggplot(analytic_df,
+       aes(x = bmi, 
+           y = sys, 
+           group = factor(income), 
+           col = factor(income))) +
+  geom_point(alpha=0.2) + 
+  geom_smooth(method = lm, se = FALSE) +
+  scale_color_viridis_d(option = "plasma", end = .7)
+ggplotly(p)
+```
+
+### Recipes for Pre-processing
+
+#### Recipes
+
+In practice, it's common to perform some preprocessing of the data to make it easier for the algorithm to fit a model to it. There's a huge range of preprocessing transformations you can perform to get your data ready for modeling, but we'll limit ourselves to a few common techniques:
+
+-   Scaling numeric features so they're on the same scale. This prevents features with large values from producing coefficients that disproportionately affect the predictions.
+
+-   Encoding categorical variables. For example, by using a *one hot encoding* technique you can create "*dummy*" or *indicator variables* which replace the original categorical feature with numeric columns whose values are either 1 or 0.
+
+For our example, lets focus on the prediction of ***Undiagnosed DM.*** Lets select some key predictors a priori just to make this tutorial a little easier. We will work on age, sex, income status, residential area, smoker, bmi, systolic bp, mean fruit and vegetable intake, vigourous activity (day and minutes), systolic blood pressure, random blood sugar and random cholestrol levels. Please note that this data has already been cleaned and coded. For the sake of the example we will have a mix of character and numeric variables.
+
+```{r}
+df <- analytic_df %>% 
+  select(undx_dm, age, sex, residential, income, 
+         smoke, bmi, mean_f, mean_v,
+         vig_day, vig_min, sys, rbs, rchol) %>%
+  mutate(undx_dm=recode(undx_dm, `0`="No", `1`="Yes"),
+         sex=recode(sex, `1`="Female", `2`="Male"),
+         residential=recode(residential, `1`="Rural", `2`="Urban"),
+         income=recode(income, `1`="M40", `2`="T20", `3`="B40"),
+         smoke=recode(smoke, `1`="Current", `2`="Former", `3`="Never")) 
+  
+```
+
+#### Train-test split
+
+`resample` is a core package in tidymodels. It provides a streamlined way to create a randomised training and test split of the original data. If we want to achieve an 80:20 split the inputs to the resample function are straightforward: data = df, prop = 0.80. We also set a seed so we can reproduce the results. With that we get an 80:20 split. That easy.
+
+```{r}
+set.seed(seed = 4763) 
+
+train_test_split <-
+  rsample::initial_split(
+    data = df,     
+    prop = 0.80   
+  ) 
+train_test_split
+```
+
+```{r}
+train_tbl <- train_test_split %>% training() 
+test_tbl  <- train_test_split %>% testing()
+```
+
+#### Transforms, One-hot encoding and imputation
+
+The `recipes` package uses a cooking metaphor for data preprocessing - missing values, imputation, centering and scaling and one-hot-encoding. Lets first try and get a summary of the structure within the data.
+
+```{r}
+rec <- recipe( ~ ., data = train_tbl)
+summary(rec)
+```
+
+It is obvious from the output there are several nominal variables (character). We knew this because we had already converted them back earlier. We can now proceed to use a simple step to get them into factors as ML models in tidymodels use factors (for categorical vars).
+
+```{r, warning=FALSE}
+recipe_simple <- function(dataset) {
+  recipe(undx_dm ~ ., data = dataset) %>%
+    step_string2factor(all_nominal(), -all_outcomes()) %>%
+    prep(data = dataset)
+}
+
+df_factorised <- recipe_simple(dataset= train_tbl)
+summary(df_factorised)
+
+```
+
+Finally to improve model performance we carry out one-hot encoding (dummy variables) although some if not most newer implementations no longer require this step. If you remember income and smoking status have \>2 levels.
+
+```{r, warning=FALSE}
+df_factorised_coded = df_factorised %>% 
+  step_dummy(c(income, smoke), one_hot = T) %>%
+  prep(training=train_tbl, retain=T)
+```
+
+Lets check the data again
+
+```{r}
+summary(df_factorised_coded)
+```
+
+Unfortunately we have some missing variables. Lets try imputing the data using a linear model. This may not be the best approach but works great for an example
+
+```{r}
+df_factorised_coded_imp = df_factorised_coded %>%
+  step_impute_linear(
+    bmi, mean_f, mean_v, vig_day, vig_min, rbs, rchol,
+    impute_with = imp_vars(sex, age)) %>%
+  prep(training=train_tbl, retain=T)
+
+```
+
+Everything looks good. Final step is to bake all the steps into the data
+
+```{r, warning=FALSE}
+train_baked <- bake(df_factorised_coded_imp, new_data = train_tbl)
+test_baked  <- bake(df_factorised_coded_imp, new_data = test_tbl)
+```
+
+### Workflows for model building
+
+`tidymodels` leans on the `parsnip` package for its model building. `parsnip` offers a unified API that allows access to a variety of analytic packages without the requirement of learning the syntax for each package. It only takes three simple steps to fit models:
+
+-   Pick the type of Model - Lets start with the most basic - logistic regression
+
+-   Specify the engine - we'll use glm
+
+-   Define the model specification / formula and data - We will saturate the model with all our selected variables
+
+In Tidymodels, this convenient object is called a [`workflow`](https://workflows.tidymodels.org/) and conveniently holds your modeling components. The [**workflows**](https://workflows.tidymodels.org/) package allows the user to bind modeling and preprocessing objects together. You can then fit the entire workflow to the data, such that the model encapsulates all of the preprocessing steps as well as the algorithm.
+
+```{r}
+#define a recipe
+logistic_recipe <- recipe(undx_dm~., data=train_baked)
+
+#specify the model
+logistic_spec <- logistic_reg() %>% 
+  set_engine("glm") %>% 
+  set_mode("classification")
+
+#define a workflow
+logistic_workflow<- workflow() %>% 
+  add_recipe(logistic_recipe) %>% 
+  add_model(logistic_spec)
+
+logistic_glm <- logistic_workflow %>% 
+  fit(data = train_baked)
+```
+
+This is a sample of a workflow. Ideally you would also integrate the above steps into the workflow like this:
+
+```{r}
+#define a recipe
+logistic_recipe <- recipe(undx_dm~., data=train_tbl) %>%
+  step_novel(all_predictors(), -all_numeric()) %>% 
+  step_string2factor(all_nominal(), -all_outcomes()) %>%
+  step_dummy(income, one_hot = T) %>%
+  step_dummy(smoke, one_hot = T) %>%
+  step_impute_linear(
+    bmi, mean_f, mean_v, vig_day, vig_min, rbs, rchol,
+    impute_with = imp_vars(sex, age)) %>%
+  step_impute_mean(smoke_Never, smoke_Former, smoke_Current) %>%
+  step_zv(all_predictors()) 
+
+#specify the model
+logistic_spec <- logistic_reg() %>% 
+  set_engine("glm") %>% 
+  set_mode("classification")
+
+#define a workflow
+logistic_workflow<- workflow() %>% 
+  add_recipe(logistic_recipe) %>% 
+  add_model(logistic_spec)
+
+#run model
+logistic_glm <- logistic_workflow %>% 
+  fit(data = train_tbl)
+```
+
+If we wanted to switch to a different engine, all we would have to do change the `set_engine` argument to the desired tool and `parsnip` handles all dirty work behind the scenes - I said unified API!
+
+-   set_engine("glmnet")
+
+-   set_engine("lm")
+
+-   set_engine("spark")
+
+-   set_engine("keras")
+
+There's a long list of engines we can use. Check out the tidymodels page for more details on [engines and models](https://www.tidymodels.org/find/parsnip/).
+
+### A note on the Bias-Variance tradeoff in ML
+
+![Bias-Variance tradeoff in ML](images/bias_variance-01.png){alt="Bias-Variance tradeoff in ML"}
+
+A model with high bias (underfitting) is one that is too simple to capture the complexity of the underlying data. For example, a linear regression model might be too simple to capture the non-linear relationship between the features and the target variable. This can result in poor performance on both the training and test data, as the model is not able to capture the true relationship between the features and the target variable.
+
+A model with high variance (overfitting) is one that is too complex and fits the training data too closely, but does not generalize well to new data. For example, a decision tree model with many branches might fit the training data very well, but may not be able to generalize to new data that is different from the training data. This can result in good performance on the training data, but poor performance on the test data.
+
+## Supervised learning for Classification tasks
+
+The above example was a simple example using a simple example using Logistic regression for a binary classification task- but with ML we can expand into comparing different models for the same task.
+
+The goal of Supervised classification: ***"Learn a classification model (classifier) from the labeled instances so as to predict labels for (classify) unseen instances"***
+
+In other words the model learns from a training set (***classifier of labelled instances***) to predict on test set (***classifier of unseen instances***)
+
+Types of supervised models include: Decision trees, k-Nearest Neighbours, Support Vector Machines, Naive Bayes, Logistic Regression, Bayesian networks/ Neural networks, Genetic Algorithms, Ensemble methods: Bagging and Boosting etc.
+
+In this course we will focus on three frequently utilised methods:
+
+1\) Decision trees with implementation of Random Forest
+
+2\) Support Vector Machines
+
+3\) Gradient Boosting
+
+### Decision Trees
+
+#### Theory
+
+A decision tree is a way to make decisions using a tree-like structure. Each node in the tree represents a question, and each branch represents a possible answer to that question. The tree starts at the top with a question, and depending on the answer, it moves down to the next level of the tree and asks another question. This continues until the tree reaches a leaf node, which represents a final decision or outcome.
+
+When a decision tree classifies things into categories its called a Classification Tree (like image below)
+
+When a decision tree predicts numeric values its called a Regression Tree.
+
+Lets see how **classification trees** are built:
+
+![A very Malaysian decision tree](images/decision_trees-02.png){alt="A very Malaysian decision tree"}
+
+Each part of the tree has its own definitions
+
+![Some definitions](images/decision_trees_definitions.png){alt="Some definitions"}
+
+But how can we decide where does the root node start? Well we can use several different mathematical solutions that include the Gini Impurity, Entropy, Information Gain etc. They sound tough but mathematically are very similar. Lets start with an example of Gini Impurity
+
+![Dummy data on Prediciting Samyang love](images/dt_eg1.png){alt="Dummy data on Prediciting Samyang love"}
+
+![Calculating Gini Impurity for Sex variable](images/dt_eg2-01.png){alt="Calculating Gini Impurity for Sex variable"}
+
+![Calculating Gini Impurity for Loves Blackpink variable](images/dt_eg3-01.png){alt="Calculating Gini Impurity for Loves Blackpink variable"}
+
+For continuous variables like age above, its a little more work but is still very simple. We do this by first iteratively building through different thresholds in the data by taking and average of two consequent rows and using this threshold to calculate the Gini. We can do this for each row and find the lowest impurity and select that threshold as the one to be used in the model.
+
+Once we select a leaf to start we can keep adding leaves by iteratively repeating the step above by carrying out another Gini at each level. We do this until there are no more values to split. And whatever we have left we can label these as our outcomes and predict on these.
+
+![Adding leaves and labelling outputs](images/dt_eg4.png){alt="Adding leaves and labelling outputs"}
+
+Now you may a question about regression trees- and the concept is just as simple- regression trees are use when the outcomes to be predicted for is continuous and instead of using a Gini Impurity (or entropy etc) we a sum of square residuals for multiple thresholds of the data just like in for the continuous example above.
+
+**ONE IMPORTANT CAVEAT TO DECISION TREES!!**
+
+If we look at the use of the age threshold \<12.5 from the continuous sample above, only 1 sample fits from the data suggesting that we could have potentially **OVERFIT** our model (i.e. we can have very little confidence in data that is predicted in this way). There are two methods to overcome this 1) Pruning, and 2) Limiting how trees grow. For pruning it will be covered sometime later (maybe). For limiting how trees grow we will cover these during the random forest specification later and also when we later learn to tune our models with Cross Validation.
+
+#### Random Forest
+
+The overfitting is the perfect introduction to Random Forests.
+
+***"Trees have one aspect that prevents them from being ideal the ideal tool for predictive learning,namely inaccuracy"*** - The Elements of Statistical Learning
+
+Random forest uses iterative resampling and multiple trees to create flexibility
+
+1\) Create a bootstrapped dataset- random
+
+2\) Create a decision tree using the bootstrapped set using random subset of data at each step
+
+Repeat step 1) and 2) multiple times (100s) creating a variety of trees (i.e. a forest of random trees)
+
+After his run the prediction set (test set) through each and every tree- and check the number of trees that classify the outcome the same way- eg loves samyang yes5, no1.
+
+**Bagging- Bootstrapping + using the aggregate to make a decision is called "Bagging"**
+
+Typically bootstrapping with replacement means 1/3rd of data will not be used. Out of bag dataset- the 1/3 rd that werent used- use this as a validation set the proportion of "out-of-bag" samples classified incorrectly is the "Out-of-bag error".
+
+We then go back and determine how many variables we use in step 2) eg we first use 2 random vars, then 3, 4 and so on and compare the accuracies of each forest.
+
+![Random forests](images/random_forest.png){alt="Random forests"}
+
+#### Building a random forest classifier!
+
+All three parameters work on the principle of the bias-variance tradeoff which is critical to ML. Reduce bias to much and you have an overfit model (highly accurate, computationally intensive, low intepretability), fit too simple a model and and it loses value (low accuracy, computationally simple, high intepretability). The three parameters in random forest are as below:
+
+1.  **`mtry`**: This parameter determines the number of variables that are considered at each split when constructing a decision tree in the random forest model. In other words, it specifies the size of the random subset of features that is used to make each split. A larger value of **`mtry`** will result in more diverse trees, which may improve the accuracy of the model, but may also increase the computational cost and reduce the interpretability of the model. One common heuristic is to set **`mtry`** to the square root of the number of predictor variables. This means that, by default, approximately 30% of the variables are considered for each split.
+
+2.  **`trees`**: This parameter specifies the number of trees that are grown in the random forest model. A larger value of **`trees`** will generally result in better performance, but will also increase the computational cost and may lead to overfitting if the model is too complex for the amount of data available. A common heuristic is to use a large number of trees, such as 500 or 1000, to ensure that the model is robust and stable.
+
+3.  **`min_n`**: This parameter specifies the minimum number of samples that are required to split a node in a decision tree. A larger value of **`min_n`** will result in simpler trees, which may improve the interpretability of the model, but may also reduce the accuracy and increase the bias of the model if the trees are too simple for the complexity of the data. A common heuristic is to set **`min_n`** to a small value, such as 5, which allows the tree to grow deeper and capture more complex relationships in the data.
+
+    *P/S: Heuristics are just guidelines and may not be the best solution for your data/question.*
+
+#### Tutorial 1:
+
+You have 5 minutes. Take into consideration: accuracy, computation, and intepretability.
+
+There is a heuristic model, and three other models. Lets see who gets the best model in the alotted time.
+
+```{r}
+#define a recipe
+rf_recipe <- recipe(undx_dm~., data=train_tbl) %>%
+  step_novel(all_predictors(), -all_numeric()) %>% 
+  step_string2factor(all_nominal(), -all_outcomes()) %>%
+  step_dummy(income, one_hot = T) %>%
+  step_dummy(smoke, one_hot = T) %>%
+  step_impute_linear(
+    bmi, mean_f, mean_v, vig_day, vig_min, rbs, rchol,
+    impute_with = imp_vars(sex, age)) %>%
+  step_impute_mean(smoke_Never, smoke_Former, smoke_Current) %>%
+  step_zv(all_predictors())
+
+#Heurisitics model
+rf_spec <- 
+  rand_forest(mtry = 4,
+              trees = 500,
+              min_n = 5,
+              mode="classification") %>%
+  set_engine("ranger") %>%
+  set_mode("classification")
+rf_workflow<- workflow() %>% 
+  add_recipe(rf_recipe) %>% 
+  add_model(rf_spec)
+rf_heuristic <- rf_workflow %>% 
+  fit(data = train_tbl)
+
+#Model 1
+rf_spec <- 
+  rand_forest(mtry = 6, #TUNE HERE
+              trees = 750, #TUNE HERE
+              min_n = 7,#TUNE HERE
+              mode="classification") %>%
+  set_engine("ranger") %>%
+  set_mode("classification")
+rf_workflow<- workflow() %>% 
+  add_recipe(rf_recipe) %>% 
+  add_model(rf_spec)
+rf_model1 <- rf_workflow %>% 
+  fit(data = train_tbl)
+
+#Model 2
+rf_spec <- 
+  rand_forest(mtry = 8, #TUNE HERE
+              trees = 1000, #TUNE HERE
+              min_n = 9,#TUNE HERE
+              mode="classification") %>%
+  set_engine("ranger") %>%
+  set_mode("classification")
+rf_workflow<- workflow() %>% 
+  add_recipe(rf_recipe) %>% 
+  add_model(rf_spec)
+rf_model2 <- rf_workflow %>% 
+  fit(data = train_tbl)
+
+#Model 3
+rf_spec <- 
+  rand_forest(mtry = 12, #TUNE HERE
+              trees = 10000, #TUNE HERE
+              min_n = 5, #TUNE HERE
+              mode="classification") %>%
+  set_engine("ranger") %>%
+  set_mode("classification")
+rf_workflow<- workflow() %>% 
+  add_recipe(rf_recipe) %>% 
+  add_model(rf_spec)
+rf_model3 <- rf_workflow %>% 
+  fit(data = train_tbl)
+
+#check accuracy of models
+predictions_rf_heu <- rf_heuristic %>%
+      predict(new_data = test_tbl) %>%
+      bind_cols(test_tbl %>% select(undx_dm))%>%
+  mutate(undx_dm=as.factor(undx_dm))
+predictions_rf_m1 <- rf_model1 %>%
+      predict(new_data = test_tbl) %>%
+      bind_cols(test_tbl %>% select(undx_dm))%>%
+  mutate(undx_dm=as.factor(undx_dm))
+predictions_rf_m2 <- rf_model2 %>%
+      predict(new_data = test_tbl) %>%
+      bind_cols(test_tbl %>% select(undx_dm))%>%
+  mutate(undx_dm=as.factor(undx_dm))
+predictions_rf_m3 <- rf_model3 %>%
+      predict(new_data = test_tbl) %>%
+      bind_cols(test_tbl %>% select(undx_dm))%>%
+  mutate(undx_dm=as.factor(undx_dm))
+
+#define metrics
+eval_metrics <- metric_set(accuracy, ppv, recall, specificity, f_meas)
+#call metrics on models
+eval_metrics_rf_heu <- eval_metrics(data = predictions_rf_heu, truth = undx_dm, estimate = .pred_class) %>%
+  select(-.estimator) %>%
+  rename("Random Forest Heuristic Model"=".estimate")
+eval_metrics_rf_m1 <- eval_metrics(data = predictions_rf_m1, truth = undx_dm, estimate = .pred_class) %>%
+  select(-.estimator) %>%
+  rename("Random Forest Model 1"=".estimate")
+eval_metrics_rf_m2 <- eval_metrics(data = predictions_rf_m2, truth = undx_dm, estimate = .pred_class) %>%
+  select(-.estimator) %>%
+  rename("Random Forest Model 2"=".estimate")
+eval_metrics_rf_m3 <- eval_metrics(data = predictions_rf_m3, truth = undx_dm, estimate = .pred_class) %>%
+  select(-.estimator) %>%
+  rename("Random Forest Model 3"=".estimate")
+
+#put them together
+left_join(eval_metrics_rf_heu, eval_metrics_rf_m1, by=".metric") %>%
+  left_join(eval_metrics_rf_m2, by=".metric") %>%
+  left_join(eval_metrics_rf_m3, by=".metric") %>%
+  kable()
+```
+
+What were your findings?
+
+### Support Vector Machines (SVM)
+
+#### Theory
+
+Lets start by discussing a very simple example of classifying a single variable. Lets call it the spiciness of a meal (Spicy vs Not Spicy). The following example would be a good way to classify, no?
+
+![Threshold Classification](images/svm_eg1.png){alt="Threshold Classification"}
+
+Threshold such as the above are prone to inaccuracies. A point slightly beyond the threshold will be classified as spicy although it looks more likely to be not spicy.
+
+![Maximal margin classification](images/svm_eg2.png){alt="Maximal margin classification"}
+
+Maximal margin classification is a great way to fix this problem by using the midpoint between edge cases. But what could possibly be problematic with this?
+
+![Effect of the outlier](images/svm_eg3.png){alt="Effect of the outlier"}
+
+Maximal margin classification is heavily effected by outliers as can be seen above. To overcome this we use something called soft margins- where we except some degree of misclassification. That degree is determined iteratively (cross validation).
+
+![Soft Margins](images/svm_eg4.png){alt="Soft Margins"}
+
+Soft margins (allowing misclassification) should produce a much more robust model- one that balance bias and variance. Soft margin classifier are also known as...??
+
+***SUPPORT VECTOR CLASSIFIERS***
+
+![Soft margins in two dimensional space](images/2d_svm_eg.png){alt="Soft margins in two dimensional space"}
+
+In two dimensional space, if you imagine the above to be spiciness level by age you could then use a soft margin to classify as above.
+
+![Soft margins in three dimensional space](images/3d_svm_eg.png){alt="Soft margins in three dimensional space"}
+
+If the same is carried in three dimensions we could use a plane to classify different groups. Mathematically this is called a ***hyperplane*** and mathematically all flat affine subspaces are considered hyperplanes and as such hyperplanes are used for all dimension classifiers even though we generally use the term only when we cannot draw the classifier on paper.
+
+BUT!
+
+![Training Data overlap](images/poly_eg1.png){alt="Training Data overlap"}
+
+When training data overlap- soft margins no longer function as well. Which brings us to our second intuition in SVMs. The idea of the polynomial kernel.
+
+A polynomial kernel draws a curved boundary that can separate data points that are not easily separated by a straight line. The degree of the polynomial determines how curved the boundary is. So, if you have a high-degree polynomial, the boundary can have lots of curves and bends, making it very flexible. This can be useful if your data is complex and requires a more complicated boundary.
+
+Main idea in SVM is:
+
+1\) Start with data in relatively low dimensions
+
+2\) Move the data into a higher dimension
+
+3\) Find a support vector classifier that separates the higher dimensional data into 2 classes
+
+Some additional info:
+
+Besides the Polynomial kernel we can also use a radial kernel (RBF).
+
+An RBF kernel draws a boundary that is more like a circle or a sphere. The kernel calculates the similarity between pairs of data points and puts them into groups based on their similarity. The center of each group is called a support vector. The kernel then draws a boundary around each support vector, which separates the data points that are similar to it from those that are not. This method can be useful when the data points are not easily separable by a straight line or a curved boundary.
+
+![A Radial Basis Function Kernel](images/rbf.png){alt="A Radial Basis Function Kernel" fig-align="center"}
+
+#### Building an SVM Classifier
+
+Just like with random forest we can specify an SVM model in R. Using a polynomial kernel we can specify the model using parameters as follows:
+
+1.  **`cost`**: This is a parameter that controls the trade-off between maximizing the margin and minimizing the classification error. A larger **`cost`** value leads to a smaller margin and a higher penalty for misclassifications, which can result in a more complex decision boundary that fits the training data better but may overfit. A smaller **`cost`** value leads to a larger margin and a lower penalty for misclassifications, which can result in a simpler decision boundary that is more generalizable but may underfit. A common heuristic for selecting the **`cost`** value is to start small. This parameters should however use a grid search or cross-validation to evaluate a range of values and choose the one that gives the best performance on a validation set.
+
+2.  **`degree`**: This is a parameter that controls the degree of the polynomial used to compute the decision boundary. A higher **`degree`** value means that the decision boundary can be more complex and have more bends and curves, which can result in better accuracy on the training data. However, a higher **`degree`** can also lead to overfitting, especially if the dataset is noisy or contains outliers. A common heuristic for selecting the **`degree`** value is to start with a low value and gradually increase it until the performance on a validation set stops improving.
+
+*P/S: Heuristics are just guidelines and may not be the best solution for your data/question.*
+
+#### Tutorial 2: Comparing kernels
+
+As SVMs take longer to compute- we shall not attempt the 4 model trial as we did in the random forest. Instead lets try in the next 5 minutes to compare a polynomial kernel to a RBF kernel. The only difference will be the specification which replaces degree for gamma.
+
+1.  **`rbf_sigma`**: This is the gamma parameter in the RBF kernel, which controls the width of the kernel function. A small value of **`rbf_sigma`**means that the kernel function has a large radius and will consider many points when computing the decision boundary. This can lead to overfitting, especially if the dataset is noisy or contains outliers. A large value of **`rbf_sigma`**means that the kernel function has a small radius and will only consider nearby points when computing the decision boundary. This can lead to underfitting, especially if the dataset is complex or has a large number of features. The "scale" option for **`rbf_sigma`**is a common choice, which scales **`rbf_sigma`**by the inverse of the number of features in the dataset.
+
+Change the parameters below as you see fit:
+
+```{r}
+#define a recipe
+svm_recipe <- recipe(undx_dm~., data=train_tbl) %>%
+  step_novel(all_predictors(), -all_numeric()) %>% 
+  step_string2factor(all_nominal(), -all_outcomes()) %>%
+  step_dummy(income, one_hot = T) %>%
+  step_dummy(smoke, one_hot = T) %>%
+  step_impute_linear(
+    bmi, mean_f, mean_v, vig_day, vig_min, rbs, rchol,
+    impute_with = imp_vars(sex, age)) %>%
+  step_impute_mean(smoke_Never, smoke_Former, smoke_Current) %>%
+  step_mutate(sex=as.numeric(sex),
+         residential=as.numeric(sex)) %>%
+  step_zv(all_predictors())
+
+#Polynomial model
+# Define the tuning specification
+svm_spec <- svm_poly(
+  cost = 0.8, #TUNE HERE
+  degree = 3) %>%#TUNE HERE
+  set_mode("classification") %>%
+  set_engine("kernlab")
+
+# Workflow for tuning
+svm_workflow <- 
+  workflow() %>%
+  add_recipe(svm_recipe) %>%
+  # add the tuning specificiatons
+  add_model(svm_spec)
+
+# Start Tuning
+svm_model_poly <-  svm_workflow %>%
+  fit(train_tbl)
+
+#RBF model
+# Define the tuning specification
+svm_spec <- svm_rbf(
+  cost = 0.8, #TUNE HERE
+  rbf_sigma  = 0.5) %>% #TUNE HERE
+  set_mode("classification") %>%
+  set_engine("kernlab")
+
+# Workflow for tuning
+svm_workflow <- 
+  workflow() %>%
+  add_recipe(svm_recipe) %>%
+  # add the tuning specificiatons
+  add_model(svm_spec)
+
+# Start Tuning
+svm_model_rbf <-  svm_workflow %>%
+  fit(train_tbl)
+
+#check accuracy of models
+predictions_svm_poly <- svm_model_poly %>%
+      predict(new_data = test_tbl) %>%
+      bind_cols(test_tbl %>% select(undx_dm))%>%
+  mutate(undx_dm=as.factor(undx_dm))
+predictions_svm_rbf <- svm_model_rbf %>%
+      predict(new_data = test_tbl) %>%
+      bind_cols(test_tbl %>% select(undx_dm))%>%
+  mutate(undx_dm=as.factor(undx_dm))
+
+#define metrics
+eval_metrics <- metric_set(accuracy, ppv, recall, specificity, f_meas)
+#call metrics on models
+eval_metrics_svm_poly <- eval_metrics(data = predictions_svm_poly, truth = undx_dm, estimate = .pred_class) %>%
+  select(-.estimator) %>%
+  rename("SVM Polynomial"=".estimate")
+eval_metrics_svm_rbf <- eval_metrics(data = predictions_svm_rbf, truth = undx_dm, estimate = .pred_class) %>%
+  select(-.estimator) %>%
+  rename("SVM RBF"=".estimate")
+
+#put them together
+left_join(eval_metrics_svm_poly, eval_metrics_svm_rbf, by=".metric") %>%
+  kable()
+```
+
+### Extreme gradient boosting
+
+#### Theory
+
+##### Gradient Boosting
+
+Firstly, xgboost is developed from the concept of Gradient boosting! The main idea behind this algorithm is to **build models sequentially and these subsequent models try to reduce the errors of the previous model (boosting)**. When the predictor is continuous, we use **Gradient Boosting Regressor** whereas when it is a classification problem, we use **Gradient Boosting Classifier**. The only difference between the two is the *Loss function*. The objective here is to minimize this loss function by adding weak learners using gradient descent. Since it is based on loss function hence for regression problems, we'll have different loss functions like **Mean squared error** (**MSE**) and for classification, we will have different for e.g **log-likelihood**.
+
+Steps to fit a gradient boosting model:
+
+1.  Build a leaf- usually the average of the predictor (if continuous).
+
+2.  Initialize the model with a simple algorithm, such as a decision tree with a small depth (between 8-32 leaves), and fit it to the training data.
+
+3.  Calculate the residual errors of the model by subtracting the predicted values from the true values.
+
+4.  Fit a new model to the residual errors, which will predict the difference between the true values and the predictions of the previous model.
+
+5.  Update the predictions of the previous model by adding the predictions of the new model, weighted by a ***learning rate*** (Scaling variable), to create a new and improved set of predictions.
+
+6.  Scale the tree and move on!
+
+7.  Repeat steps 2-4 until the desired level of accuracy is achieved or a predefined number of models have been added to the ensemble.
+
+![Gradient Boosting Algorithm](images/gb.png){alt="Gradient Boosting Algorithm"}
+
+##### extremeGradient Boosting (xgboost)
+
+So how is Xgboost different from plain old gradient boosting:
+
+1.  **Xgboost** **trees**: Xgboost uses a unique decision tree as opposed to a regular decision tree in gradient boosting. It uses the gain statistics (as opposed to impurity if you still remember).
+
+    First we calculate a Similarity score for a given threshold= Sum of residuals square/ number of residuals + lambda (regularization parameter). Calculate a total similarity, and for each leaf. Then estimate the Gain=Left leaf similarity + Right leaf similarity - Root similarity. This is how xgboost determine how to classify.
+
+2.  **Regularization**: Xgboost uses a more regularized model formulation to prevent overfitting. It does this by adding a regularization term (lambda) to the objective function that penalizes model complexity. This helps to reduce the variance of the model and prevent overfitting. Xgboost utilises a pruning parameter gamma, based on gai to determine if a split should be removed. (Gain-gamma=+ value (keep) or -value (remove)
+
+3.  **Approximate greedy algorithm:** The XGBoost model uses an approximate greedy algorithm to build the decision trees. The algorithm is designed to be fast and scalable, making it suitable for large datasets. During the tree construction process, the algorithm makes use of a weighted quantile sketch to efficiently calculate the approximate quantiles of the input features. This helps to reduce the number of splits that need to be evaluated, which in turn speeds up the tree construction process.
+
+4.  **Weighted quantile sketch:** The weighted quantile sketch is a data structure that is used to calculate the approximate quantiles of the input features. It works by assigning weights to the input features based on their importance, and then computing the approximate quantiles using these weighted values. This allows the XGBoost model to efficiently split the data at each node of the decision tree, which is important for creating accurate and efficient models. Here's an example of how the weighted quantile sketch works:
+
+    Suppose we have a dataset with a single feature, and we want to find the median value of that feature. The traditional approach would be to sort the data and find the middle value. However, this approach can be slow and memory-intensive, especially for large datasets. With the weighted quantile sketch, we can approximate the median value using a much smaller number of calculations. The sketch assigns weights to each data point based on its position in the sorted list, and then calculates the weighted median using these values.
+
+5.  **Sparsity-aware split finding:** XGBoost is designed to work with sparse data, which is common in many real-world applications. The sparsity-aware split finding algorithm used in XGBoost is designed to handle missing values and efficiently split the data based on the non-zero values of the input features. This allows the model to effectively handle sparse data without sacrificing performance. Here's an example of how sparsity-aware split finding works:
+
+    Suppose we have a dataset with many missing values. The traditional approach would be to impute these missing values, which can be time-consuming and may introduce bias into the model. With sparsity-aware split finding, XGBoost can effectively handle missing values without imputation. The algorithm identifies the non-zero values of the input features and uses these values to split the data. This allows the model to effectively use the available data without relying on imputation.
+
+6.  **Parallel learning:** XGBoost can be trained in parallel on multiple processors or machines, which speeds up the training process. The model uses a data parallelism approach, where each worker processes a subset of the data independently and then aggregates the results. This allows XGBoost to effectively scale to large datasets and compute resources. Here's an example of how parallel learning works:
+
+    Suppose we have a large dataset that we want to train a model on. With traditional machine learning algorithms, training on this dataset could take a long time and may require a large amount of memory. With parallel learning in XGBoost, we can split the dataset into smaller subsets and train the model on each subset in parallel. This allows us to effectively use multiple processors or machines and greatly speed up the training process.
+
+7.  **Cache-aware access:** XGBoost is designed to minimize the amount of data movement between memory and cache, which can be a bottleneck in many machine learning algorithms. The model uses a cache-aware access strategy that ensures that the most frequently accessed data is stored in cache, which reduces the amount of data movement and speeds up the training process. Here's an example of how cache-aware access works:
+
+    Suppose we have a dataset that is too large to fit into memory. With traditional machine learning algorithms, loading data from disk can be slow
+
+##### A note on Gradient descent
+
+![Gradient Descent](images/descent.png){alt="Gradient Descent"}
+
+Gradient descent is used to find the minimum point of a mathematical function. The function might have many peaks and valleys, and we want to find the lowest valley. We start at some point and take steps in the direction of the steepest descent (or negative gradient) until we reach the lowest point.
+
+##### A note on regularization
+
+L1 regularization tries to simplify a model by setting some of its coefficients (or weights) to zero. This helps prevent overfitting, which is when a model becomes too complex and fits the training data too closely, but does not generalize well to new data. L1 regularization is like putting your toys in the box in a way that only allows a certain number of toys. You might choose to keep your favorite toys and leave out the ones you don't play with as much.
+
+L2 regularization tries to simplify a model by shrinking its coefficients towards zero, without setting them to exactly zero. This helps prevent overfitting and also improves the stability of the model. L2 regularization is like putting your toys in the box in a way that allows all of them to fit, but not too tightly. You might arrange the toys so that they are evenly spaced and not too close together.
+
+***It does this by adding a cost function (penalized weight)!***
+
+#### Building an xgboost model
+
+Just like for all the previous modelling approaches, xgboost requires parameterisation. These are:
+
+1.  **`trees`**: The number of decision trees to create in the ensemble. A higher value will typically result in better performance, but can also increase the risk of overfitting. A typical starting value could be around 100, and then increase or decrease based on the model's performance.
+
+2.  **`tree_depth`**: The maximum depth of each decision tree. A higher value will allow the model to capture more complex relationships in the data, but can also increase the risk of overfitting. A typical starting value could be around 6 or 8, and then increase or decrease based on the model's performance.
+
+3.  **`min_n`**: The minimum number of observations that must be present in a leaf node of a decision tree. A higher value can prevent overfitting, but may also result in underfitting. A typical starting value could be around 10 or 20, and then increase or decrease based on the model's performance.
+
+4.  **`loss_reduction`**: The minimum amount of loss reduction required to split a node in a decision tree. A higher value can prevent overfitting, but may also result in underfitting. A typical starting value could be around 0.1, and then increase or decrease based on the model's performance.
+
+5.  **`sample_size`**: The fraction of observations to randomly sample for each tree. A lower value can prevent overfitting, but may also result in underfitting. A typical starting value could be around 0.7 or 0.8, and then increase or decrease based on the model's performance.
+
+6.  **`mtry`**: The number of variables to randomly select for each split in a decision tree. A higher value can result in better performance, but can also increase the risk of overfitting. A typical starting value could be around the square root of the number of features, and then increase or decrease based on the model's performance.
+
+7.  **`learn_rate`**: The step size to use when updating the weights in each iteration. A lower value can result in better performance, but may also require more iterations to converge. A typical starting value could be around 0.1, and then increase or decrease based on the model's performance.
+
+*P/S: Heuristics are just guidelines and may not be the best solution for your data/question.*
+
+#### Tutorial 3: Fitting an xgboost model
+
+You have 5 minutes. Take into consideration: accuracy, computation, and intepretability.
+
+There is a heuristic model, and three other models. Lets see who gets the best model in the alotted time.
+
+```{r}
+#define a recipe
+xgboost_recipe <- recipe(undx_dm~., data=train_tbl) %>%
+  step_novel(all_predictors(), -all_numeric()) %>% 
+  step_string2factor(all_nominal(), -all_outcomes()) %>%
+  step_dummy(income, one_hot = T) %>%
+  step_dummy(smoke, one_hot = T) %>%
+  step_impute_linear(
+    bmi, mean_f, mean_v, vig_day, vig_min, rbs, rchol,
+    impute_with = imp_vars(sex, age)) %>%
+  step_impute_mean(smoke_Never, smoke_Former, smoke_Current) %>%
+  step_mutate(sex=as.numeric(sex),
+         residential=as.numeric(sex)) %>%
+  step_zv(all_predictors())
+
+#Heuristic model
+#specify the model
+xgboost_spec <- 
+  boost_tree(
+  trees = 100,
+  tree_depth = 6,
+  min_n = 10,
+  loss_reduction = 0.01,
+  sample_size = 0.7,
+  mtry = 3,
+  learn_rate = 0.1) %>% 
+  set_mode("classification") %>% 
+  set_engine("xgboost") 
+#define the workflow
+xgboost_workflow <- 
+  workflow() %>% 
+  add_recipe(xgboost_recipe) %>% 
+  add_model(xgboost_spec)
+#run the model
+xgb_heu <- xgboost_workflow %>% 
+  fit(train_tbl)
+
+#Model 1
+#specify the model
+xgboost_spec <- 
+  boost_tree(
+  trees = 200,
+  tree_depth = 6,
+  min_n = 10,
+  loss_reduction = 0.01,
+  sample_size = 0.8,
+  mtry = 3,
+  learn_rate = 0.25) %>% 
+  set_mode("classification") %>% 
+  set_engine("xgboost") 
+#define the workflow
+xgboost_workflow <- 
+  workflow() %>% 
+  add_recipe(xgboost_recipe) %>% 
+  add_model(xgboost_spec)
+#run the model
+xgb_m1 <- xgboost_workflow %>% 
+  fit(train_tbl)
+
+#Model 2
+#specify the model
+xgboost_spec <- 
+  boost_tree(
+  trees = 500,
+  tree_depth = 6,
+  min_n = 10,
+  loss_reduction = 0.2,
+  sample_size = 0.9,
+  mtry = 3,
+  learn_rate = 0.5) %>% 
+  set_mode("classification") %>% 
+  set_engine("xgboost") 
+#define the workflow
+xgboost_workflow <- 
+  workflow() %>% 
+  add_recipe(xgboost_recipe) %>% 
+  add_model(xgboost_spec)
+#run the model
+xgb_m2 <- xgboost_workflow %>% 
+  fit(train_tbl)
+
+#Model 3
+#specify the model
+xgboost_spec <- 
+  boost_tree(
+  trees = 1000,
+  tree_depth = 8,
+  min_n = 10,
+  loss_reduction = 0.7,
+  sample_size = 1,
+  mtry = 3,
+  learn_rate = 1) %>% 
+  set_mode("classification") %>% 
+  set_engine("xgboost") 
+#define the workflow
+xgboost_workflow <- 
+  workflow() %>% 
+  add_recipe(xgboost_recipe) %>% 
+  add_model(xgboost_spec)
+#run the model
+xgb_m3 <- xgboost_workflow %>% 
+  fit(train_tbl)
+
+#predict values
+predictions_xgb_heu <- xgb_heu %>%
+      predict(new_data = test_tbl) %>%
+      bind_cols(test_tbl %>% select(undx_dm)) %>%
+  mutate(undx_dm=as.factor(undx_dm))
+predictions_xgb_m1 <- xgb_m1 %>%
+      predict(new_data = test_tbl) %>%
+      bind_cols(test_tbl %>% select(undx_dm)) %>%
+  mutate(undx_dm=as.factor(undx_dm))
+predictions_xgb_m2 <- xgb_m2 %>%
+      predict(new_data = test_tbl) %>%
+      bind_cols(test_tbl %>% select(undx_dm)) %>%
+  mutate(undx_dm=as.factor(undx_dm))
+predictions_xgb_m3 <- xgb_m3 %>%
+      predict(new_data = test_tbl) %>%
+      bind_cols(test_tbl %>% select(undx_dm)) %>%
+  mutate(undx_dm=as.factor(undx_dm))
+
+#define metrics
+eval_metrics <- metric_set(accuracy, ppv, recall, specificity, f_meas)
+#call metrics on models
+eval_metrics_xgb_heu <- eval_metrics(data = predictions_xgb_heu, truth = undx_dm, estimate = .pred_class) %>%
+  select(-.estimator) %>%
+  rename("Xgboost Heuristic Model"=".estimate")
+eval_metrics_xgb_m1 <- eval_metrics(data = predictions_xgb_m1, truth = undx_dm, estimate = .pred_class) %>%
+  select(-.estimator) %>%
+  rename("Xgboost Model 1"=".estimate")
+eval_metrics_xgb_m2 <- eval_metrics(data = predictions_xgb_m2, truth = undx_dm, estimate = .pred_class) %>%
+  select(-.estimator) %>%
+  rename("Xgboost Model 2"=".estimate")
+eval_metrics_xgb_m3 <- eval_metrics(data = predictions_xgb_m3, truth = undx_dm, estimate = .pred_class) %>%
+  select(-.estimator) %>%
+  rename("Xgboost Model 3"=".estimate")
+
+#put them together
+left_join(eval_metrics_xgb_heu, eval_metrics_xgb_m1, by=".metric") %>%
+  left_join(eval_metrics_xgb_m2, by=".metric") %>%
+  left_join(eval_metrics_xgb_m3, by=".metric") %>%
+  kable()
+```
+
+## **Cross Validation**
+
+Cross-validation is a statistical method used to evaluate the performance of a machine learning model on a limited dataset. The common types of cross validation are k-fold cross validation, leave-one-out cross validation, stratified cross validation, and nested cross validation.
+
+For posterity we will limit ourselves to k-fold here. K-fold cross validation helps us avoid overfitting (when a model performs well on the training data but poorly on new data) and gives us a more reliable estimate of how well our model will generalize to new data. These are steps used in k-folds:
+
+1.  We divide our dataset into k subsets or "folds" of approximately equal size.
+
+2.  We train our model on k-1 folds of the data, and then use the remaining fold as the validation set to evaluate the model's performance.
+
+3.  We repeat this process k times, with each fold serving as the validation set exactly once.
+
+4.  Finally, we average the performance across all k folds to get an overall estimate of how well our model is likely to perform on new, unseen data.
+
+![K-folds cross validation](images/cv_kfolds.png){alt="K-folds cross validation"}
+
+Grid search is a technique used to find the best combination of hyperparameters (settings for a machine learning model that are not learned from the data, but rather set by the user) for a given model.
+
+Here's how it works:
+
+1.  We define a set of hyperparameters to explore and their possible values.
+
+2.  We then create a grid of all possible combinations of these hyperparameters.
+
+3.  For each combination of hyperparameters, we perform k-fold cross validation to evaluate the performance of the model.
+
+4.  We choose the combination of hyperparameters that gives the best performance.
+
+Hyperparameter tuning is the process of finding the best combination of hyperparameters for a given machine learning model.
+
+Using k-fold cross validation during grid search and hyperparameter tuning ensures that we are not overfitting our model to a particular set of hyperparameters, and gives us a more accurate estimate of how well our model is likely to perform on new, unseen data.
+
+### ![K-folds cross validation for Grid Search and Hyperparameter tuning](images/cv_kfolds_gridsearch.png){alt="K-folds cross validation for Grid Search and Hyperparameter tuning"}
+
+Random Forest CV
+
+#### Set up the model
+
+So lets recap on the model we have built so far. One trick we havent learnt so far is to shorten the amount of code needed for training and testing. We can use the `last_fit()` function in from tidymodels to train on the train data and automatically test it using the original train-test split.
+
+```{r}
+#define a recipe
+rf_recipe <- recipe(undx_dm~., data=train_tbl) %>%
+  step_novel(all_predictors(), -all_numeric()) %>% 
+  step_string2factor(all_nominal(), -all_outcomes()) %>%
+  step_dummy(income, one_hot = T) %>%
+  step_dummy(smoke, one_hot = T) %>%
+  step_impute_linear(
+    bmi, mean_f, mean_v, vig_day, vig_min, rbs, rchol,
+    impute_with = imp_vars(sex, age)) %>%
+  step_impute_mean(smoke_Never, smoke_Former, smoke_Current) %>%
+  step_zv(all_predictors())
+
+#specify the model
+rf_spec <- 
+  rand_forest(mtry = 4,#specifies the number of variables that are randomly sampled as candidates at each split in the tree
+              trees = 500,#specifies the number of trees in the forest
+              min_n = 5,#minimum number of observations required to split a node
+              mode="classification") %>%
+  set_engine("ranger") %>%
+  set_mode("classification")
+
+#define a workflow
+rf_workflow<- workflow() %>% 
+  add_recipe(rf_recipe) %>% 
+  add_model(rf_spec)
+
+#run the model
+random_forest_base <- rf_workflow %>% 
+  last_fit(train_test_split)
+
+#check accuracy 
+#check the rocjand accuracy
+rf_metrics_base <- random_forest_base %>% 
+  collect_metrics() %>% select(.metric, .estimate) %>%
+  rename(base=.estimate)
+```
+
+Let now how we can tune this model using CV. First lets specify the hyperparameters we would like to tune.
+
+```{r}
+#specify the model
+rf_spec <- 
+  rand_forest(mtry = tune(),
+              trees = 1000,
+              min_n = tune(),
+              mode="classification") %>%
+  set_engine("ranger") %>%
+  set_mode("classification")
+
+#define a workflow
+rf_workflow<- workflow() %>% 
+  add_recipe(rf_recipe) %>% 
+  add_model(rf_spec)
+```
+
+#### Train hyperparameters
+
+Set up the CV resamples for tuning
+
+```{r}
+set.seed(234)
+rf_folds <- vfold_cv(train_tbl)
+```
+
+Set up parallel processing to speed up the process. Multiple grid points can be process independently and simultaneously.
+
+```{r}
+doParallel::registerDoParallel()
+
+set.seed(345)
+rf_tune <- tune_grid(
+  rf_workflow,
+  resamples = rf_folds,
+  grid = 20
+)
+
+rf_tune
+```
+
+We can visualise this validation set using AUC
+
+```{r}
+rf_tune %>%
+  collect_metrics() %>%
+  filter(.metric == "roc_auc") %>%
+  select(mean, min_n, mtry) %>%
+  pivot_longer(min_n:mtry,
+    values_to = "value",
+    names_to = "parameter"
+  ) %>%
+  ggplot(aes(value, mean, color = parameter)) +
+  geom_point(show.legend = FALSE) +
+  facet_wrap(~parameter, scales = "free_x") +
+  labs(x = NULL, y = "AUC")
+```
+
+The grid search is not exhaustive in that it does not check every combination of hyperparameters. It however gives us a good idea of what values could work better. Wider ranges require greater computation. In this example and considering the AUCs are rather narrow- lets focus on a short range.
+
+```{r}
+rf_grid <- grid_regular(
+  mtry(range = c(3, 7)),
+  min_n(range = c(30, 35)),
+  levels = 5
+)
+
+rf_grid
+```
+
+Now we can tune again but using a more refined search grid.
+
+```{r}
+set.seed(456)
+rf_tune <- tune_grid(
+  rf_workflow,
+  resamples = rf_folds,
+  grid = rf_grid
+)
+
+rf_tune
+```
+
+Lets see how we did this time
+
+```{r}
+rf_tune %>%
+  collect_metrics() %>%
+  filter(.metric == "roc_auc") %>%
+  mutate(min_n = factor(min_n)) %>%
+  ggplot(aes(mtry, mean, color = min_n)) +
+  geom_line(alpha = 0.5, size = 1.5) +
+  geom_point() +
+  labs(y = "AUC")
+```
+
+Now that actually is really interesting and gives a mtry of 5 and min_n of 33. However imagine if we had way more parameters than this. We can just ask the model to find the best parameters and bake it into our model specification.
+
+```{r}
+rf_auc <- select_best(rf_tune, "roc_auc")
+
+rf_cv <- finalize_model(
+  rf_spec,
+  rf_auc
+)
+
+rf_cv
+```
+
+Excellent! Now lets train the final model and compare to the base model.
+
+```{r}
+#redefine a workflow
+rf_workflow<- workflow() %>% 
+  add_recipe(rf_recipe) %>% 
+  add_model(rf_cv)
+
+#run the model
+random_forest_final <- rf_workflow %>% 
+  last_fit(train_test_split)
+
+#check the rocjand accuracy
+rf_metrics_final <- random_forest_final %>%
+  collect_metrics() %>% select(.metric, .estimate) %>%
+  rename(final=.estimate)
+
+#compare the models
+rf_metrics <- left_join(rf_metrics_base, rf_metrics_final, by=".metric")
+rf_metrics
+```
+
+### Support Vector Machines CV
+
+#### Set up the model
+
+Similar to the random forest story, lets set up a base model for SVM
+
+```{r}
+#define a recipe
+svm_recipe <- recipe(undx_dm~., data=train_tbl) %>%
+  step_novel(all_predictors(), -all_numeric()) %>% 
+  step_string2factor(all_nominal(), -all_outcomes()) %>%
+  step_dummy(income, one_hot = T) %>%
+  step_dummy(smoke, one_hot = T) %>%
+  step_impute_linear(
+    bmi, mean_f, mean_v, vig_day, vig_min, rbs, rchol,
+    impute_with = imp_vars(sex, age)) %>%
+  step_impute_mean(smoke_Never, smoke_Former, smoke_Current) %>%
+  step_mutate(sex=as.numeric(sex),
+         residential=as.numeric(sex)) %>%
+  step_zv(all_predictors())
+
+# Define the tuning specification
+svm_spec <- svm_poly(
+  cost = 0.25, 
+  degree = 1) %>%
+  set_mode("classification") %>%
+  set_engine("kernlab")
+
+# Workflow for tuning
+svm_workflow <- 
+  workflow() %>%
+  add_recipe(svm_recipe) %>%
+  # add the tuning specificiatons
+  add_model(svm_spec)
+
+#run the model
+svm_base <-  svm_workflow %>% 
+  last_fit(train_test_split)
+
+#check accuracy 
+#check the rocjand accuracy
+svm_metrics_base <- svm_base %>% 
+  collect_metrics() %>% select(.metric, .estimate) %>%
+  rename(base=.estimate)
+```
+
+Let now how we can tune this model using CV. First lets specify the hyperparameters we would like to tune.
+
+```{r}
+# Define the tuning specification
+svm_spec <- svm_poly(
+  cost = tune(), 
+  degree = tune()) %>%
+  set_mode("classification") %>%
+  set_engine("kernlab")
+
+# Workflow for tuning
+svm_workflow <- 
+  workflow() %>%
+  add_recipe(svm_recipe) %>%
+  add_model(svm_spec)
+
+```
+
+#### Train hyperparameters
+
+Set up the CV resamples for tuning
+
+```{r}
+set.seed(234)
+svm_folds <- vfold_cv(train_tbl)
+```
+
+Set up parallel processing to speed up the process. Multiple grid points can be process independently and simultaneously.
+
+```{r}
+doParallel::registerDoParallel()
+
+set.seed(345)
+svm_tune <- tune_grid(
+  svm_workflow,
+  resamples = svm_folds,
+  grid = 20
+)
+
+svm_tune
+```
+
+We can visualise this validation set using AUC
+
+```{r}
+svm_tune %>%
+  collect_metrics() %>%
+  filter(.metric == "roc_auc") %>%
+  select(mean, cost, degree) %>%
+  pivot_longer(cost:degree,
+    values_to = "value",
+    names_to = "parameter"
+  ) %>%
+  ggplot(aes(value, mean, color = parameter)) +
+  geom_point(show.legend = FALSE) +
+  facet_wrap(~parameter, scales = "free_x") +
+  labs(x = NULL, y = "AUC")
+```
+
+The grid search is not exhaustive in that it does not check every combination of hyperparameters. It however gives us a good idea of what values could work better. Wider ranges require greater computation. In this example and considering the AUCs are rather narrow- lets focus on a short range.
+
+```{r}
+svm_grid <- grid_regular(
+  cost(range = c(0, 12)),
+  degree(range = c(0,1)),
+  levels = 5
+)
+
+svm_grid
+```
+
+Now we can tune again but using a more refined search grid.
+
+```{r}
+set.seed(456)
+svm_tune <- tune_grid(
+  svm_workflow,
+  resamples = svm_folds,
+  grid = svm_grid
+)
+
+svm_tune
+```
+
+Lets see how we did this time
+
+```{r}
+svm_tune %>%
+  collect_metrics() %>%
+  filter(.metric == "roc_auc") %>%
+  mutate(degree = factor(degree)) %>%
+  ggplot(aes(cost, mean, color = degree)) +
+  geom_line(alpha = 0.5, size = 1.5) +
+  geom_point() +
+  labs(y = "AUC")
+```
+
+Now for SVM we certainly see that the parameters are more difficult to intepret. Lets leave to the the algorithm.
+
+```{r}
+svm_auc <- select_best(svm_tune, "roc_auc")
+
+svm_cv <- finalize_model(
+  svm_spec,
+  svm_auc
+)
+
+svm_cv
+```
+
+Excellent! Now lets train the final model and compare to the base model.
+
+```{r}
+#redefine a workflow
+svm_workflow<- workflow() %>% 
+  add_recipe(svm_recipe) %>% 
+  add_model(svm_cv)
+
+#run the model
+random_forest_final <- svm_workflow %>% 
+  last_fit(train_test_split)
+
+#check the rocjand accuracy
+svm_metrics_final <- random_forest_final %>%
+  collect_metrics() %>% select(.metric, .estimate) %>%
+  rename(final=.estimate)
+
+#compare the models
+svm_metrics <- left_join(svm_metrics_base, svm_metrics_final, by=".metric")
+svm_metrics
+```
+
+### XGBoost CV
+
+#### Set up the model
+
+And finally lets set up a base model for xgboost
+
+```{r}
+#define a recipe
+xgb_recipe <- recipe(undx_dm~., data=train_tbl) %>%
+  step_novel(all_predictors(), -all_numeric()) %>% 
+  step_string2factor(all_nominal(), -all_outcomes()) %>%
+  step_dummy(income, one_hot = T) %>%
+  step_dummy(smoke, one_hot = T) %>%
+  step_impute_linear(
+    bmi, mean_f, mean_v, vig_day, vig_min, rbs, rchol,
+    impute_with = imp_vars(sex, age)) %>%
+  step_impute_mean(smoke_Never, smoke_Former, smoke_Current) %>%
+  step_mutate(sex=as.numeric(sex),
+         residential=as.numeric(sex)) %>%
+  step_zv(all_predictors())
+
+#specify the model
+xgb_spec <- 
+  boost_tree(
+  trees = 100,
+  tree_depth = 6,
+  min_n = 10,
+  loss_reduction = 0.01,
+  sample_size = 0.7,
+  mtry = 3,
+  learn_rate = 0.1) %>% 
+  set_mode("classification") %>% 
+  set_engine("xgboost") 
+
+#define the workflow
+xgb_workflow <- 
+  workflow() %>% 
+  add_recipe(xgb_recipe) %>% 
+  add_model(xgb_spec)
+
+#run the model
+xgb_base <- xgb_workflow %>% 
+  last_fit(train_test_split)
+
+#check accuracy 
+#check the rocjand accuracy
+xgb_metrics_base <- xgb_base %>% 
+  collect_metrics() %>% select(.metric, .estimate) %>%
+  rename(base=.estimate)
+```
+
+Let now how we can tune this model using CV. First lets specify the hyperparameters we would like to tune.
+
+```{r}
+##specify the model
+xgb_spec <- 
+  boost_tree(
+  trees = 1000,
+  tree_depth = tune(),
+  min_n = tune(),
+  loss_reduction = tune(),
+  sample_size = tune(),
+  mtry = tune(),
+  learn_rate = tune()) %>% 
+  set_mode("classification") %>% 
+  set_engine("xgboost") 
+
+#define the workflow
+xgb_workflow <- 
+  workflow() %>% 
+  add_recipe(xgb_recipe) %>% 
+  add_model(xgb_spec)
+```
+
+#### Train hyperparameters
+
+Set up the CV resamples for tuning
+
+```{r}
+set.seed(234)
+xgb_folds <- vfold_cv(train_tbl)
+```
+
+The tuning process in xgboost is technically similar to random forest- however it is not. This is due to the sheer number of parameters that require tuning with xgboost. As such a space filling design is utilised instead of the usual grid selection method. This is implemented using the `grid_latin_hypercube` function.
+
+```{r}
+xgb_grid <- grid_latin_hypercube(
+  tree_depth(),
+  min_n(),
+  loss_reduction(),
+  sample_size = sample_prop(),
+  finalize(mtry(), train_tbl),
+  learn_rate(),
+  size = 30
+)
+
+xgb_grid
+```
+
+As we did previously lets tune parallel to speed up the process
+
+```{r}
+doParallel::registerDoParallel()
+
+set.seed(234)
+xgb_tune <- tune_grid(
+  xgb_workflow,
+  resamples = xgb_folds,
+  grid = xgb_grid,
+  control = control_grid(save_pred = TRUE)
+)
+
+xgb_tune
+```
+
+We can visualise the hyperparameter grid search to better understand our results as well
+
+```{r}
+xgb_tune %>%
+  collect_metrics() %>%
+  filter(.metric == "roc_auc") %>%
+  select(mean, mtry:sample_size) %>%
+  pivot_longer(mtry:sample_size,
+               values_to = "value",
+               names_to = "parameter"
+  ) %>%
+  ggplot(aes(value, mean, color = parameter)) +
+  geom_point(alpha = 0.8, show.legend = FALSE) +
+  facet_wrap(~parameter, scales = "free_x") +
+  labs(x = NULL, y = "AUC")
+```
+
+We can visualise the diverse ways really our model can be tuned but lets leave the selection to the function `select_best` instead of going through the trouble of manually figuring out which is best.
+
+```{r}
+xgb_auc <- select_best(xgb_tune, "roc_auc")
+
+xgb_cv <- finalize_model(
+  xgb_spec,
+  xgb_auc
+)
+
+xgb_cv
+```
+
+Excellent! Now lets train the final model and compare to the base model.
+
+```{r}
+#redefine a workflow
+xgb_workflow<- workflow() %>% 
+  add_recipe(xgb_recipe) %>% 
+  add_model(xgb_cv)
+
+#run the model
+xgb_final <- xgb_workflow %>% 
+  last_fit(train_test_split)
+
+#check the rocjand accuracy
+xgb_metrics_final <- xgb_final %>%
+  collect_metrics() %>% select(.metric, .estimate) %>%
+  rename(final=.estimate)
+
+#compare the models
+xgb_metrics <- left_join(xgb_metrics_base, xgb_metrics_final, by=".metric")
+xgb_metrics
+```
+
+## **Model Evaluation**
+
+In the above examples we 'shortcutted' a step by using the `last_fit` function. Let us rebuild the models to evaluate our models stepwise.
+
+```{r}
+#run the model
+rf_final <- rf_workflow %>% 
+  fit(train_tbl)
+
+#run the model
+svm_final <- svm_workflow %>% 
+  fit(train_tbl)
+
+#run the model
+xgb_final <- xgb_workflow %>% 
+  fit(train_tbl)
+```
+
+Evaluation is where the `yardstick` packages comes in. `yardstick` provide a simple way to calculate several popular assessment measures. But before we can do that we'll need some predictions. We get our predictions by passing the test_baked data to the `predict function`
+
+```{r}
+predictions_glm <- logistic_glm %>%
+      predict(new_data = test_tbl) %>%
+      bind_cols(test_tbl %>% select(undx_dm)) %>%
+  mutate(undx_dm=as.factor(undx_dm))
+
+predictions_rf <- rf_final %>%
+      predict(new_data = test_tbl) %>%
+      bind_cols(test_tbl %>% select(undx_dm))%>%
+  mutate(undx_dm=as.factor(undx_dm))
+
+predictions_svm <- svm_final %>%
+      predict(new_data = test_tbl) %>%
+      bind_cols(test_tbl %>% select(undx_dm))%>%
+  mutate(undx_dm=as.factor(undx_dm))
+
+predictions_xgb <- xgb_final %>%
+      predict(new_data = test_tbl) %>%
+      bind_cols(test_tbl %>% select(undx_dm))%>%
+  mutate(undx_dm=as.factor(undx_dm))
+
+```
+
+Now with our freshly minted predictions there are several metrics that can be used to evaluate the performance of our classification model.
+
+### Confusion matrix
+
+The confusion matrix classifies cases between two binary categories, category 1 for patients who tested positive for diabetes and category 0 for patients who tested negative.
+
+```{r}
+plot_glm <- 
+  predictions_glm %>%
+  conf_mat(undx_dm, .pred_class) %>%
+  pluck(1) %>%
+  as_tibble() %>%
+  ggplot(aes(Prediction, Truth, alpha = n)) +
+  geom_tile(show.legend = FALSE) +
+  geom_text(aes(label = n), colour = "white", alpha = 1, size = 8) +
+  ggtitle("Logistic Regression")
+
+plot_rf <- 
+  predictions_rf %>%
+  conf_mat(undx_dm, .pred_class) %>%
+  pluck(1) %>%
+  as_tibble() %>%
+  ggplot(aes(Prediction, Truth, alpha = n)) +
+  geom_tile(show.legend = FALSE) +
+  geom_text(aes(label = n), colour = "white", alpha = 1, size = 8)+
+  ggtitle("Random Forest")
+
+plot_svm <- 
+  predictions_svm %>%
+  conf_mat(undx_dm, .pred_class) %>%
+  pluck(1) %>%
+  as_tibble() %>%
+  ggplot(aes(Prediction, Truth, alpha = n)) +
+  geom_tile(show.legend = FALSE) +
+  geom_text(aes(label = n), colour = "white", alpha = 1, size = 8)+
+  ggtitle("Support Vector Machines")
+
+plot_xgb <- 
+  predictions_xgb %>%
+  conf_mat(undx_dm, .pred_class) %>%
+  pluck(1) %>%
+  as_tibble() %>%
+  ggplot(aes(Prediction, Truth, alpha = n)) +
+  geom_tile(show.legend = FALSE) +
+  geom_text(aes(label = n), colour = "white", alpha = 1, size = 8)+
+  ggtitle("xgBoost")
+
+plot_grid(plot_glm, plot_rf, plot_svm, plot_xgb, nrow = 2)
+```
+
+Using the GLM model as an example If your model predicts a patient as 1 (positive) and they belong to category 1 (positive) in reality we call this a true positive, shown by the top left number 112.
+
+If your model predicts a patient as 0 (negative) and they belong to category 1 (positive) in reality we call this a false negative, shown by the bottom left number 191
+
+If your model predicts a patient as 1 (positive) and they belong to category 0 (negative) in reality we call this a false positive, shown by the top right number 73.
+
+If your model predicts a patient as 0 (negative) and they belong to category 0 (negative) in reality we call this a true negative, shown by the bottom right number 2429
+
+Our confusion matrix can thus be expressed in the following form:
+
+\| \| \| Predicted \| Predicted \| \|
+
+\|\-\-\-\-\-\--\|\-\-\-\--\|\-\-\-\-\-\-\-\-\-\--\|\-\-\-\-\-\-\-\-\-\--\|\-\--\|
+
+\| \| \| Yes \| No \| \|
+
+\| Truth \| Yes \| 112 (TP) \| 191 (FN) \| \|
+
+\| Truth \| No \| 73 (FP) \| 2429 (TN) \| \|
+
+As you might have guessed it's preferable to have a larger number of true positives and true negatives and a lower number of false positives and false negatives, which implies that the model performs better. Now with just a few more lines of code with have a Confusion Matrix that can be leveraged to calculate additional metrics. We will be looking at several important measures such as:
+
+-   Accuracy: TP + TN/(TP + TN + FP + FN) The percentage of labels predicted accurately for a sample. The model's Accuracy is the fraction of predictions the model got right and can be easily calculated by passing the predictions_glm to the metrics function. However, accuracy is not a very reliable metric as it will provide misleading results if the data set is unbalanced.
+
+-   Precision and Recall:
+
+    -   Precision (PPV): TP/(TP + FP) defined as the proportion of predicted positives that are actually positive. Also called positive predictive value
+    -   Recall (Sensitivity): TP/(TP + FN) defined as the proportion of positive results out of the number of samples which were actually positive.
+
+Precision shows how sensitive models are to False Positives (i.e. predicting a customer is leaving when he-she is actually staying) whereas Recall looks at how sensitive models are to False Negatives.
+
+These are very relevant business metrics because organisations are particularly interested in accurately predicting which customers are truly at risk of leaving so that they can target them with retention strategies. At the same time they want to minimising efforts of retaining customers incorrectly classified as leaving who are instead staying.
+
+-   Specificity: TN/(TN + FP) defined as the proportion of negative results out of the number of samples which were actually negative.
+
+-   F1 Score: A weighted average of the precision and recall, with best being 1 and worst being 0. The F1 Score is the harmonic average of the precision and recall. An F1 score reaches its best value at 1 with perfect precision and recall.
+
+Tidymodels provides yet another succinct way of evaluating all these metrics. Using yardstick::metric_set(), you can combine multiple metrics together into a new function that calculates all of them at once.
+
+```{r}
+#define metrics
+eval_metrics <- metric_set(accuracy, ppv, recall, specificity, f_meas)
+
+#call metrics on models
+eval_metrics_glm <- eval_metrics(data = predictions_glm, truth = undx_dm, estimate = .pred_class) %>%
+  select(-.estimator) %>%
+  rename("Logistic regression"=".estimate")
+
+eval_metrics_rf <- eval_metrics(data = predictions_rf, truth = undx_dm, estimate = .pred_class)%>%
+  select(-.estimator) %>%
+  rename("Random forest"=".estimate")
+
+eval_metrics_xgb <- eval_metrics(data = predictions_xgb, truth = undx_dm, estimate = .pred_class)%>%
+  select(-.estimator) %>%
+  rename("xgBoost"=".estimate")
+
+eval_metrics_svm <- eval_metrics(data = predictions_svm, truth = undx_dm, estimate = .pred_class)%>%
+  select(-.estimator) %>%
+  rename("Supervised vector machines"=".estimate")
+
+#put them together
+left_join(eval_metrics_glm, eval_metrics_rf, by=".metric") %>%
+  left_join(eval_metrics_xgb, by=".metric") %>%
+  left_join(eval_metrics_svm, by=".metric") %>%
+  kable()
+```
+
+Using the precision (ppv) metric, we are able to answer the question: - Of all the patients the model predicted are diabetic, how many are actually diabetic?
+
+Using the recall metric, we are able to answer the question: - Of all the patients that are actually diabetic, how many did the model identify?
+
+### ROC Curve
+
+Until now, we've considered the predictions from the model as being either 1 or 0 class labels. Actually, things are a little more complex than that. Statistical machine learning algorithms, like logistic regression, are based on probability; so what actually gets predicted by a binary classifier is the probability that the label is true (P(y)) and the probability that the label is false (1−P(y)). A threshold value of 0.5 is used to decide whether the predicted label is a 1 (P(y)\>0.5) or a 0 (P(y)\<=0.5). The decision to score a prediction as a 1 or a 0 depends on the threshold to which the predicted probabilities are compared. If we were to change the threshold, it would affect the predictions; and therefore change the metrics in the confusion matrix. A common way to evaluate a classifier is to examine the true positive rate (which is another name for recall) and the false positive rate (1 - specificity) for a range of possible thresholds. These rates are then plotted against all possible thresholds to form a chart known as a received operator characteristic (ROC) chart, like this:
+
+```{r}
+#tabulate probabilities
+predictions_glm <- predictions_glm %>% 
+  bind_cols(logistic_glm %>% 
+              predict(new_data = test_tbl, type = "prob"))
+
+predictions_rf <- predictions_rf %>% 
+  bind_cols(rf_final %>% 
+              predict(new_data = test_tbl, type = "prob"))
+
+predictions_svm <- predictions_svm %>% 
+  bind_cols(svm_final %>% 
+              predict(new_data = test_tbl, type = "prob"))
+
+predictions_xgb <- predictions_xgb %>% 
+  bind_cols(xgb_final %>% 
+              predict(new_data = test_tbl, type = "prob"))
+
+# Make a roc_chart
+roc_glm <- predictions_glm %>% 
+  roc_curve(truth = undx_dm, .pred_No) %>% 
+  autoplot() +
+  ggtitle("Logistic regression")
+
+roc_rf <- predictions_rf %>% 
+  roc_curve(truth = undx_dm, .pred_No) %>% 
+  autoplot() +
+  ggtitle("Random forest")
+
+roc_svm <- predictions_svm %>% 
+  roc_curve(truth = undx_dm, .pred_No) %>% 
+  autoplot() +
+  ggtitle("Supervised Vector Machines")
+
+
+roc_xgb <- predictions_xgb %>% 
+  roc_curve(truth = undx_dm, .pred_No) %>% 
+  autoplot() +
+  ggtitle("xgBoost")
+
+# put them together
+plot_grid(roc_glm, roc_rf, roc_svm, roc_xgb,nrow = 2)
+```
+
+The ROC chart shows the curve of the true and false positive rates for different threshold values between 0 and 1. A perfect classifier would have a curve that goes straight up the left side and straight across the top. The diagonal line across the chart represents the probability of predicting correctly with a 50/50 random prediction; so you obviously want the curve to be higher than that (or your model is no better than simply guessing!).
+
+The area under the curve (AUC) is a value between 0 and 1 that quantifies the overall performance of the model. One way of interpreting AUC is as the probability that the model ranks a random positive example more highly than a random negative example. The closer to 1 this value is, the better the model. Once again, Tidymodels includes a function to calculate this metric: yardstick::roc_auc()
+
+### Moving beyond: Explainable ML
+
+There are several definition of interpretability in the context of a Machine Learning model. I vibe with "trust". Trust that the model is predicting a certain value for the "right reasons". These can by in no means replace the "odds ratio" for instance but have a different objective in mind.
+
+![Importance of Explaining your Model](images/explainable.png){alt="Importance of Explaining your Model"}
+
+SHAP stands for Shapley Additive Explanations. It is model agnostic, efficient algorithm to compute feature importance.
+
+![Shapley equation](images/shapley-equation-01.png){alt="Shapley equation"}
+
+For the purposes of this tutorial we shall only explore the use of the final xgboost model but the approach is transferable. First lets create a shapley dataset (resampled data).
+
+```{r}
+#define a recipe
+shap_recipe1 <- recipe(undx_dm~., data = train_tbl) %>%
+  step_novel(all_predictors(), -all_numeric()) %>% 
+  step_string2factor(all_nominal(), -all_outcomes()) %>%
+  step_integer(sex) %>%
+  step_integer(residential) %>%
+  step_dummy(income, one_hot = T) %>%
+  step_dummy(smoke, one_hot = T) %>%
+  step_impute_linear(
+    bmi, mean_f, mean_v, vig_day, vig_min, rbs, rchol,
+    impute_with = imp_vars(sex, age)) %>%
+  step_impute_mean(smoke_Never, smoke_Former, smoke_Current) %>%
+  step_zv(all_predictors()) 
+
+#rerun the final model with the new data
+#redefine a workflow
+shap_workflow<- workflow() %>% 
+  add_recipe(shap_recipe1) %>% 
+  add_model(xgb_cv)
+
+#run the model
+shap_final <- shap_workflow %>% 
+  fit(train_tbl)
+
+#get a resampled shap dataframe
+shap_df <- bake(
+  prep(shap_recipe1),
+  new_data = train_tbl
+)
+
+#setup a second recipe
+shap_recipe2 <- recipe(undx_dm~., data = shap_df) %>% 
+  step_integer(all_nominal())
+
+#sample a 1000 rows
+shap_sample_df <- shap_df[sample(nrow(shap_df), 1000),]
+
+#create a matrix for the shap process
+shap_df_prep <- bake(
+  prep(shap_recipe2), 
+  has_role("predictor"),
+  new_data = shap_sample_df, 
+  composition = "matrix"
+)
+
+#create a shap object
+shap <- explain(extract_fit_engine(shap_final), X_pred = shap_df_prep, X = shap_sample_df)
+```
+
+The shap tutuorial here utilises the `shapviz` package. These can produce quite impressive plots but they have their limitations (and certainly visually the Python `shap` package produces more and better plots). There are several important plots that we can develop using the shapley approach. This includes:
+
+Summary Plot (or Importance plot): The summary plot is a bar chart that shows the top features in descending order of importance. The features are colored according to their value, where blue indicates low values and red indicates high values. The height of the bar represents the impact of the feature on the model's output. The further the bar is to the right, the higher the impact of the feature.
+
+```{r}
+sv_importance(shap, kind = "beeswarm", show_numbers = TRUE)
+```
+
+Dependence Plot: The dependence plot shows the relationship between a single feature and the predicted outcome of the model. The x-axis represents the feature's values, and the y-axis represents the SHAP values, which represent the impact of the feature on the model's output. The color of each point represents the value of another feature that is correlated with the feature in question. A steep upward slope suggests a positive correlation between the feature and the model's output, while a steep downward slope suggests a negative correlation.
+
+```{r}
+sv_dependence(shap, "rbs", color_var = "auto")
+sv_dependence(shap, "sys", color_var = "auto")
+```
+
+Force Plot: The force plot is a visual representation of how the input features contribute to the model's output for a specific instance. It displays the SHAP value of each feature as a vertical bar, which can be either positive or negative. The horizontal position of the bar represents the magnitude of the SHAP value, and the color indicates whether the feature value is high or low. The force plot can help identify which features are contributing positively or negatively to the model's output for a given instance.
+
+```{r}
+sv_force(shap, row_id = shap$X$income_B40==0)
+```
+
+Interaction Plot: The interaction plot displays how the effect of one feature on the model's output changes based on the value of another feature. Each point on the plot represents a specific instance, and the color represents the value of a third feature that is not included in the plot. A strong positive interaction suggests that the effect of one feature is amplified when the other feature is also present, while a strong negative interaction suggests that the effect of one feature is reduced when the other feature is present.
+
+```{r}
+sv_waterfall(shap, row_id = 1)
+```
+
+## Take home message
+
+-   Try to continue exploring the recipes and workflow. Homework- try the functions
+
+    -   recipes: `step_impute_****` (`mean`, `knn`, `median` etc)
+
+    -   workflows: `add_formula()`, `update_formula()`, `fit_data()`, `fit_split()`, `update_model()`, `collect_predictions()`
+
+    -   different shap packages- `fastshap`
+
+-   This document is currently meant to serve as an introduction to workflows within the tidymodels ecosystem for machine learning R.
+
+-   For use only within SBDR- PLEASE DO NOT SHARE OUTSIDE OF SBDR WITHOUT PERMISSION AS DATA WAS ONLY UTILISED FOR INTERNAL CIRCULATION.
+
+![Journey with R (AI Generated Image by DALL-E/ Vivek Jason)](images/journey_withR.png){alt="Journey with R (AI Generated Image by DALL-E/ Vivek Jason)"}
+
+## References
+
+1.  [Tidy Modelling with R](https://www.tmwr.org/)
+2.  [Tidymodelling in R Book Club](https://r4ds.github.io/bookclub-tmwr/index.html)
+3.  [Tidymodels website](https://www.tidymodels.org/find/parsnip/)
+4.  [The Julia Silge Blog](https://juliasilge.com/blog/)
+5.  [StatQuest](https://www.youtube.com/@statquest)
