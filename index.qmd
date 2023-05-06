@@ -311,7 +311,7 @@ There's a long list of engines we can use. Check out the tidymodels page for mor
 
 ### A note on the Bias-Variance tradeoff in ML
 
-![Bias-Variance tradeoff in ML](images/bias_variance-01.png){alt="Bias-Variance tradeoff in ML"}
+![Bias-Variance tradeoff in ML (Source: Tassopoulou, 2019 & Kaggle blog, 2020)](images/bias_variance.png){alt="Bias-Variance tradeoff in ML"}
 
 A model with high bias (underfitting) is one that is too simple to capture the complexity of the underlying data. For example, a linear regression model might be too simple to capture the non-linear relationship between the features and the target variable. This can result in poor performance on both the training and test data, as the model is not able to capture the true relationship between the features and the target variable.
 
@@ -347,25 +347,25 @@ When a decision tree predicts numeric values its called a Regression Tree.
 
 Lets see how **classification trees** are built:
 
-![A very Malaysian decision tree](images/decision_trees-02.png){alt="A very Malaysian decision tree"}
+![A very Malaysian decision tree (Addapted from StatQuest, Youtbe 2019)](images/decision_trees.png){alt="A very Malaysian decision tree"}
 
 Each part of the tree has its own definitions
 
-![Some definitions](images/decision_trees_definitions.png){alt="Some definitions"}
+![Some definitions (Adapted from StatQuest, Youtube 2019)](images/decision_trees_definitions.png){alt="Some definitions"}
 
 But how can we decide where does the root node start? Well we can use several different mathematical solutions that include the Gini Impurity, Entropy, Information Gain etc. They sound tough but mathematically are very similar. Lets start with an example of Gini Impurity
 
-![Dummy data on Prediciting Samyang love](images/dt_eg1.png){alt="Dummy data on Prediciting Samyang love"}
+![Dummy data on Prediciting Samyang love (Adapted from StatQuest, Youtube 2019)](images/dt_eg1.png){alt="Dummy data on Prediciting Samyang love"}
 
-![Calculating Gini Impurity for Sex variable](images/dt_eg2-01.png){alt="Calculating Gini Impurity for Sex variable"}
+![Calculating Gini Impurity for Sex variable (Adapted from StatQuest, Youtube 2019)](images/dt_eg2.png){alt="Calculating Gini Impurity for Sex variable"}
 
-![Calculating Gini Impurity for Loves Blackpink variable](images/dt_eg3-01.png){alt="Calculating Gini Impurity for Loves Blackpink variable"}
+![Calculating Gini Impurity for Loves Blackpink variable (Adapted from StatQuest, Youtube 2019)](images/dt_eg3.png){alt="Calculating Gini Impurity for Loves Blackpink variable"}
 
 For continuous variables like age above, its a little more work but is still very simple. We do this by first iteratively building through different thresholds in the data by taking and average of two consequent rows and using this threshold to calculate the Gini. We can do this for each row and find the lowest impurity and select that threshold as the one to be used in the model.
 
 Once we select a leaf to start we can keep adding leaves by iteratively repeating the step above by carrying out another Gini at each level. We do this until there are no more values to split. And whatever we have left we can label these as our outcomes and predict on these.
 
-![Adding leaves and labelling outputs](images/dt_eg4.png){alt="Adding leaves and labelling outputs"}
+![Adding leaves and labelling outputs (Adapted from StatQuest, Youtube 2019)](images/dt_eg4.png){alt="Adding leaves and labelling outputs"}
 
 Now you may a question about regression trees- and the concept is just as simple- regression trees are use when the outcomes to be predicted for is continuous and instead of using a Gini Impurity (or entropy etc) we a sum of square residuals for multiple thresholds of the data just like in for the continuous example above.
 
@@ -395,7 +395,7 @@ Typically bootstrapping with replacement means 1/3rd of data will not be used. O
 
 We then go back and determine how many variables we use in step 2) eg we first use 2 random vars, then 3, 4 and so on and compare the accuracies of each forest.
 
-![Random forests](images/random_forest.png){alt="Random forests"}
+![Simplified Schematization of Random Trees (Source: Catalyst Earth, 2023)](images/random_forest.png){alt="Random forests"}
 
 #### Building a random forest classifier!
 
@@ -440,7 +440,7 @@ rf_workflow<- workflow() %>%
   add_recipe(rf_recipe) %>% 
   add_model(rf_spec)
 rf_heuristic <- rf_workflow %>% 
-  fit(data = train_tbl)
+ fit(data = train_tbl)
 
 #Model 1
 rf_spec <- 
@@ -454,7 +454,7 @@ rf_workflow<- workflow() %>%
   add_recipe(rf_recipe) %>% 
   add_model(rf_spec)
 rf_model1 <- rf_workflow %>% 
-  fit(data = train_tbl)
+ fit(data = train_tbl)
 
 #Model 2
 rf_spec <- 
@@ -468,7 +468,7 @@ rf_workflow<- workflow() %>%
   add_recipe(rf_recipe) %>% 
   add_model(rf_spec)
 rf_model2 <- rf_workflow %>% 
-  fit(data = train_tbl)
+ fit(data = train_tbl)
 
 #Model 3
 rf_spec <- 
@@ -482,7 +482,7 @@ rf_workflow<- workflow() %>%
   add_recipe(rf_recipe) %>% 
   add_model(rf_spec)
 rf_model3 <- rf_workflow %>% 
-  fit(data = train_tbl)
+ fit(data = train_tbl)
 
 #check accuracy of models
 predictions_rf_heu <- rf_heuristic %>%
@@ -533,35 +533,35 @@ What were your findings?
 
 Lets start by discussing a very simple example of classifying a single variable. Lets call it the spiciness of a meal (Spicy vs Not Spicy). The following example would be a good way to classify, no?
 
-![Threshold Classification](images/svm_eg1.png){alt="Threshold Classification"}
+![Threshold Classification (Adapted from StatQuest, Youtube 2019)](images/svm_eg1.png){alt="Threshold Classification"}
 
 Threshold such as the above are prone to inaccuracies. A point slightly beyond the threshold will be classified as spicy although it looks more likely to be not spicy.
 
-![Maximal margin classification](images/svm_eg2.png){alt="Maximal margin classification"}
+![Maximal margin classification (Adapted from StatQuest, Youtube 2019)](images/svm_eg2.png){alt="Maximal margin classification"}
 
 Maximal margin classification is a great way to fix this problem by using the midpoint between edge cases. But what could possibly be problematic with this?
 
-![Effect of the outlier](images/svm_eg3.png){alt="Effect of the outlier"}
+![Effect of the outlier (Adapted from StatQuest, Youtube 2019)](images/svm_eg3.png){alt="Effect of the outlier"}
 
 Maximal margin classification is heavily effected by outliers as can be seen above. To overcome this we use something called soft margins- where we except some degree of misclassification. That degree is determined iteratively (cross validation).
 
-![Soft Margins](images/svm_eg4.png){alt="Soft Margins"}
+![Soft Margins (Adapted from StatQuest, Youtube 2019)](images/svm_eg4.png){alt="Soft Margins"}
 
 Soft margins (allowing misclassification) should produce a much more robust model- one that balance bias and variance. Soft margin classifier are also known as...??
 
 ***SUPPORT VECTOR CLASSIFIERS***
 
-![Soft margins in two dimensional space](images/2d_svm_eg.png){alt="Soft margins in two dimensional space"}
+![Soft margins in two dimensional space (Adapted from StatQuest, Youtube 2019)](images/2d_svm_eg.png){alt="Soft margins in two dimensional space"}
 
 In two dimensional space, if you imagine the above to be spiciness level by age you could then use a soft margin to classify as above.
 
-![Soft margins in three dimensional space](images/3d_svm_eg.png){alt="Soft margins in three dimensional space"}
+![Soft margins in three dimensional space (Adapted from StatQuest, Youtube 2019)](images/3d_svm_eg.png){alt="Soft margins in three dimensional space"}
 
 If the same is carried in three dimensions we could use a plane to classify different groups. Mathematically this is called a ***hyperplane*** and mathematically all flat affine subspaces are considered hyperplanes and as such hyperplanes are used for all dimension classifiers even though we generally use the term only when we cannot draw the classifier on paper.
 
 BUT!
 
-![Training Data overlap](images/poly_eg1.png){alt="Training Data overlap"}
+![Training Data overlap (Adapted from StatQuest, Youtube 2019)](images/poly_eg1.png){alt="Training Data overlap"}
 
 When training data overlap- soft margins no longer function as well. Which brings us to our second intuition in SVMs. The idea of the polynomial kernel.
 
@@ -581,7 +581,7 @@ Besides the Polynomial kernel we can also use a radial kernel (RBF).
 
 An RBF kernel draws a boundary that is more like a circle or a sphere. The kernel calculates the similarity between pairs of data points and puts them into groups based on their similarity. The center of each group is called a support vector. The kernel then draws a boundary around each support vector, which separates the data points that are similar to it from those that are not. This method can be useful when the data points are not easily separable by a straight line or a curved boundary.
 
-![A Radial Basis Function Kernel](images/rbf.png){alt="A Radial Basis Function Kernel" fig-align="center"}
+![A Radial Basis Function Kernel (Source: Zhou 2017)](images/rbf.png){alt="A Radial Basis Function Kernel" fig-align="center"}
 
 #### Building an SVM Classifier
 
@@ -703,7 +703,7 @@ Steps to fit a gradient boosting model:
 
 7.  Repeat steps 2-4 until the desired level of accuracy is achieved or a predefined number of models have been added to the ensemble.
 
-![Gradient Boosting Algorithm](images/gb.png){alt="Gradient Boosting Algorithm"}
+![Gradient Boosting Algorithm (Adapted from StatQuest, Youtube 2019)](images/gb.png){alt="Gradient Boosting Algorithm"}
 
 ##### extremeGradient Boosting (xgboost)
 
@@ -735,7 +735,7 @@ So how is Xgboost different from plain old gradient boosting:
 
 ##### A note on Gradient descent
 
-![Gradient Descent](images/descent.png){alt="Gradient Descent"}
+![Gradient Descent (Source: Hikmat et al, 2021)](images/descent.png){alt="Gradient Descent"}
 
 Gradient descent is used to find the minimum point of a mathematical function. The function might have many peaks and valleys, and we want to find the lowest valley. We start at some point and take steps in the direction of the steepest descent (or negative gradient) until we reach the lowest point.
 
@@ -931,7 +931,7 @@ For posterity we will limit ourselves to k-fold here. K-fold cross validation he
 
 4.  Finally, we average the performance across all k folds to get an overall estimate of how well our model is likely to perform on new, unseen data.
 
-![K-folds cross validation](images/cv_kfolds.png){alt="K-folds cross validation"}
+![K-folds cross validation (Source: Jian et al, 2022)](images/cv_kfolds.png){alt="K-folds cross validation"}
 
 Grid search is a technique used to find the best combination of hyperparameters (settings for a machine learning model that are not learned from the data, but rather set by the user) for a given model.
 
@@ -949,9 +949,9 @@ Hyperparameter tuning is the process of finding the best combination of hyperpar
 
 Using k-fold cross validation during grid search and hyperparameter tuning ensures that we are not overfitting our model to a particular set of hyperparameters, and gives us a more accurate estimate of how well our model is likely to perform on new, unseen data.
 
-### ![K-folds cross validation for Grid Search and Hyperparameter tuning](images/cv_kfolds_gridsearch.png){alt="K-folds cross validation for Grid Search and Hyperparameter tuning"}
+### ![K-folds cross validation for Grid Search and Hyperparameter tuning (Source: Jian et al, 2022)](images/cv_kfolds_gridsearch.png){alt="K-folds cross validation for Grid Search and Hyperparameter tuning"}
 
-Random Forest CV
+### Random Forest CV
 
 #### Set up the model
 
@@ -1692,11 +1692,11 @@ The area under the curve (AUC) is a value between 0 and 1 that quantifies the ov
 
 There are several definition of interpretability in the context of a Machine Learning model. I vibe with "trust". Trust that the model is predicting a certain value for the "right reasons". These can by in no means replace the "odds ratio" for instance but have a different objective in mind.
 
-![Importance of Explaining your Model](images/explainable.png){alt="Importance of Explaining your Model"}
+![Importance of Explaining your Model (Source: Moneda, 2021)](images/explainable.png){alt="Importance of Explaining your Model"}
 
 SHAP stands for Shapley Additive Explanations. It is model agnostic, efficient algorithm to compute feature importance.
 
-![Shapley equation](images/shapley-equation-01.png){alt="Shapley equation"}
+![Shapley equation (Source: Linberry, 2021)](images/shapley-equation.png){alt="Shapley equation"}
 
 For the purposes of this tutorial we shall only explore the use of the final xgboost model but the approach is transferable. First lets create a shapley dataset (resampled data).
 
@@ -1747,7 +1747,7 @@ shap_df_prep <- bake(
 )
 
 #create a shap object
-shap <- explain(extract_fit_engine(shap_final), X_pred = shap_df_prep, X = shap_sample_df)
+shap <- shapviz(extract_fit_engine(shap_final), X_pred = shap_df_prep, X = shap_sample_df)
 ```
 
 The shap tutuorial here utilises the `shapviz` package. These can produce quite impressive plots but they have their limitations (and certainly visually the Python `shap` package produces more and better plots). There are several important plots that we can develop using the shapley approach. This includes:
@@ -1768,7 +1768,7 @@ sv_dependence(shap, "sys", color_var = "auto")
 Force Plot: The force plot is a visual representation of how the input features contribute to the model's output for a specific instance. It displays the SHAP value of each feature as a vertical bar, which can be either positive or negative. The horizontal position of the bar represents the magnitude of the SHAP value, and the color indicates whether the feature value is high or low. The force plot can help identify which features are contributing positively or negatively to the model's output for a given instance.
 
 ```{r}
-sv_force(shap, row_id = shap$X$income_B40==0)
+sv_force(shap)
 ```
 
 Interaction Plot: The interaction plot displays how the effect of one feature on the model's output changes based on the value of another feature. Each point on the plot represents a specific instance, and the color represents the value of a third feature that is not included in the plot. A strong positive interaction suggests that the effect of one feature is amplified when the other feature is also present, while a strong negative interaction suggests that the effect of one feature is reduced when the other feature is present.
@@ -1789,7 +1789,7 @@ sv_waterfall(shap, row_id = 1)
 
 -   This document is currently meant to serve as an introduction to workflows within the tidymodels ecosystem for machine learning R.
 
--   For use only within SBDR- PLEASE DO NOT SHARE OUTSIDE OF SBDR WITHOUT PERMISSION AS DATA WAS ONLY UTILISED FOR INTERNAL CIRCULATION.
+-   For use only within SBDR- Materials for INTERNAL USE ONLY
 
 ![Journey with R (AI Generated Image by DALL-E/ Vivek Jason)](images/journey_withR.png){alt="Journey with R (AI Generated Image by DALL-E/ Vivek Jason)"}
 
